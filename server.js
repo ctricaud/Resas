@@ -335,19 +335,23 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       const localMap  = new Map(localRows.map(r => [r.id, r]));
       const remoteSet = new Set(remoteIds);
 
-      let nbAjout = 0, nbDesactive = 0, nbDejaInactif = 0, nbDejaPresent = 0;
+      let nbAjout = 0, nbDesactive = 0, nbDejaInactif = 0, nbDejaPresent = 0, nbOwnerMaj = 0;
 
-      // ── Étape 2 : pour chaque _id Guesty absent en local → appel détail
-      // (identique au VBA : If dicListings(idListing) = "" Then GuestyGetListing idListing)
+      // ── Étape 2 : pour chaque _id Guesty → appel détail
+      // Nouveaux  : INSERT complet (logique VBA GuestyGetListing)
+      // Existants sans owner_id : on récupère le détail pour rétablir le lien owner
       for (const id of remoteIds) {
-        if (localMap.has(id)) {
-          // Déjà présent → on ne touche RIEN (logique VBA)
+        const local = localMap.get(id);
+
+        if (local && local.owner_id) {
+          // Déjà présent avec owner → on ne touche RIEN (logique VBA)
           nbDejaPresent++;
           continue;
         }
 
-        // Nouveau listing → appel /listings/:id pour les détails
-        log.push({ type: 'info', msg: `Récupération détails listing [${id}]…` });
+        // Nouveau listing OU listing existant sans owner_id → appel /listings/:id
+        const isNew = !local;
+        log.push({ type: 'info', msg: `Récupération détails [${id}]${isNew ? ' (nouveau)' : ' (owner manquant)'}…` });
         try {
           const g = await guestyGet(token, `https://open-api.guesty.com/v1/listings/${id}`);
 
@@ -358,6 +362,16 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
           const ownerMatch = rawText.match(/"owners":\["([^"]+)"/);
           if (ownerMatch) ownerId = ownerMatch[1];
 
+          if (!isNew) {
+            // Listing existant sans owner_id → on met à jour uniquement owner_id
+            run('UPDATE listings SET owner_id=? WHERE id=?', [ownerId, id]);
+            log.push({ type: 'maj', msg: `OWNER LIÉ [${id}] "${local.nom}" → owner [${ownerId}]` });
+            nbOwnerMaj++;
+            continue;
+          }
+
+          // ── Nouveau listing : INSERT complet (logique VBA GuestyGetListing) ──
+
           // Résolution nom owner
           const ownerRow = ownerId ? query('SELECT nom FROM owners WHERE id=?', [ownerId])[0] : null;
           const ownerNom = ownerRow ? ownerRow.nom : null;
@@ -367,9 +381,7 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
           const nom = businessName || (ownerNom ? `${ownerNom} - ${id.slice(-2)}` : `(sans nom) - ${id.slice(-2)}`);
 
           // Calcul commission (logique VBA)
-          // T(5) = commissionTaxPercentage, T(9) = commissionFormula
-          // Si commissionTaxPercentage != "" : extraire le facteur de commissionFormula
-          // "net_income*X " → comm = X * (100 + taxPct) / 100
+          // "net_income*X" dans commissionFormula → comm = X * (100 + taxPct) / 100
           let comm = null;
           const taxPct = g.commissionTaxPercentage != null ? parseFloat(g.commissionTaxPercentage) : null;
           const commFormula = g.commissionFormula || '';
@@ -385,11 +397,11 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
             if (rawMenage != null && rawMenage !== '') menage = parseFloat(String(rawMenage).replace(',', '.'));
           }
 
-          const titre       = g.title       || null;
-          const active      = g.active      ? 1 : 0;
-          const revenuNet   = g.netIncomeFormula    || null;
-          const commissionF = g.commissionFormula   || null;
-          const versementF  = g.ownerRevenueFormula || null;
+          const titre       = g.title                 || null;
+          const active      = g.active                ? 1 : 0;
+          const revenuNet   = g.netIncomeFormula       || null;
+          const commissionF = g.commissionFormula      || null;
+          const versementF  = g.ownerRevenueFormula    || null;
           const extUrl      = (g.integrations && g.integrations[0] && g.integrations[0].externalUrl)
                               ? g.integrations[0].externalUrl : null;
           const type        = g.type || 'SINGLE';
@@ -422,7 +434,7 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       }
 
       log.push({ type: 'info', msg: '─────────────────────────────' });
-      log.push({ type: 'ok', msg: `Résumé : ${nbAjout} ajout(s), ${nbDejaPresent} déjà présent(s) non modifié(s), ${nbDesactive} désactivation(s), ${nbDejaInactif} déjà inactif(s).` });
+      log.push({ type: 'ok', msg: `Résumé : ${nbAjout} ajout(s), ${nbOwnerMaj} owner(s) rétabli(s), ${nbDejaPresent} inchangé(s), ${nbDesactive} désactivation(s), ${nbDejaInactif} déjà inactif(s).` });
 
     } catch (err) {
       log.push({ type: 'err', msg: `ERREUR : ${err.message}` });
@@ -436,6 +448,286 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
         <h2>Lancer une nouvelle synchronisation</h2>
         <div class="notice">⚠️ Nouveaux listings ajoutés uniquement. Champs manuels jamais écrasés.</div>
         <form method="POST" action="/maj-listings">
+          <button type="submit" class="btn btn-gold">🔄 Synchroniser à nouveau</button>
+        </form>
+        <a href="/" class="btn btn-back">← Accueil</a>
+      </div>
+      <div class="card">
+        <h2>Journal des opérations</h2>
+        <div class="log-box">${renderLogBox(log)}</div>
+      </div>`
+    ));
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ── MAJ Réservations (/maj-reservations) ────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Logique VBA GuestyGetReservations + GuestyTraitementReservations :
+  //
+  // ÉTAPE 1 — Charger les 100 dernières réservations "confirmed" depuis Guesty
+  //   URL : /reservations?fields=...&sort=-checkIn&limit=100&filters=[{status:confirmed}]
+  //   Champs récupérés : _id, listingId, integration.platform, checkIn,
+  //                      nightsCount, status
+  //   → Stocké dans une Map temporaire "listeGuesty" (clé = id réservation)
+  //
+  // ÉTAPE 2 — CompareResasDansGuesty : Guesty → local
+  //   Pour chaque résa Guesty, construire la clé composite :
+  //     listing_nom|platform|yyyymmdd|duree
+  //   Si absente en local → appel GuestyGetReservation(id) pour le détail
+  //   puis INSERT avec les champs calculés (voir GuestyAddReservation)
+  //
+  // ÉTAPE 3 — CompareGuestyDansResas : local → Guesty
+  //   Pour chaque résa locale (triée date desc), si date < aujourd'hui - 20 jours → stop
+  //   Si clé composite absente dans listeGuesty → DELETE local (GuestyRemoveReservation)
+  //
+  // CALCULS sur le détail (GuestyGetReservation + GuestyAddReservation) :
+  //   menage       = money.fareCleaning
+  //   prix_total   = money.netIncome + menage          (HT hors taxe séjour)
+  //   commission   = (prix_total - money.ownerRevenue) + fees[0].amount
+  //   comm         = listings.comm (taux HOBE du listing, stocké en décimal ex: 0.15)
+  //   versement    = (prix_total - menage - commission) * (1 - comm)
+  //   hobe         = menage + versement * comm / (1 - comm)
+  //   prix_nuit    = prix_total / duree
+  //   booking_date = guestStay.createdAt  (date de réservation)
+  //   date_debut   = checkIn (date uniquement, sans heure)
+  //
+  // CLÉ COMPOSITE (identique VBA KeyOf) :
+  //   listing_nom + "|" + platform + "|" + yyyymmdd(date_debut) + "|" + duree
+  //   Nota : on utilise listing_nom (pas listing_id) comme le VBA qui stocke
+  //   le nom dans ListeGuesty via dicListings
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get('/maj-reservations', (req, res) => {
+    res.send(pageShell(
+      'MAJ Réservations',
+      'Synchronisation avec l\'API Guesty — table <code>reservations</code>',
+      `<div class="card">
+        <h2>Lancer la synchronisation</h2>
+        <p>Récupère les 100 dernières réservations confirmées depuis Guesty.</p>
+        <div class="notice">
+          ⚠️ Les réservations absentes de Guesty sont supprimées <strong>uniquement dans la fenêtre des 20 derniers jours</strong>.<br>
+          Les nouvelles réservations sont ajoutées avec recalcul complet des montants.
+        </div>
+        <form method="POST" action="/maj-reservations">
+          <button type="submit" class="btn btn-gold">🔄 Synchroniser maintenant</button>
+        </form>
+        <a href="/" class="btn btn-back">← Accueil</a>
+      </div>`
+    ));
+  });
+
+  app.post('/maj-reservations', async (req, res) => {
+    const log = [];
+    log.push({ type: 'info', msg: `Synchronisation démarrée le ${new Date().toLocaleString('fr-FR')}` });
+
+    // ── Helper : clé composite identique au VBA KeyOf ────────────────────────
+    // listing_nom|platform|yyyymmdd|duree
+    function keyOf(listingNom, platform, dateDebut, duree) {
+      const d    = new Date(dateDebut);
+      const yyyy = d.getFullYear();
+      const mm   = String(d.getMonth() + 1).padStart(2, '0');
+      const dd   = String(d.getDate()).padStart(2, '0');
+      return `${listingNom}|${platform}|${yyyy}${mm}${dd}|${duree}`;
+    }
+
+    // ── Helper : parser une date ISO8601 en "YYYY-MM-DD" (comme VBA Int(date)) ─
+    function isoToDate(iso) {
+      if (!iso) return null;
+      // On prend juste la partie date (comme VBA Int() qui tronque l'heure)
+      return iso.slice(0, 10);
+    }
+
+    // ── Helper : extraire un montant Currency depuis un champ Guesty ──────────
+    function toMoney(val) {
+      if (val == null || val === '') return 0;
+      return parseFloat(String(val).replace(',', '.')) || 0;
+    }
+
+    try {
+      log.push({ type: 'info', msg: 'Récupération du token Guesty…' });
+      const token = await getGuestyToken();
+      log.push({ type: 'ok', msg: 'Token obtenu.' });
+
+      // ── Charger le dictionnaire des listings locaux (comme VBA LectureDicListings)
+      // On a besoin de : listing_id → { nom, comm }
+      const listingRows = query('SELECT id, nom, comm FROM listings');
+      const dicListings  = new Map(listingRows.map(r => [r.id, { nom: r.nom, comm: r.comm }]));
+
+      // ── ÉTAPE 1 : Charger les 100 dernières réservations confirmed depuis Guesty
+      // Identique au VBA : filtre status=confirmed, sort=-checkIn, limit=100
+      log.push({ type: 'info', msg: 'Récupération des réservations Guesty (100 dernières confirmées)…' });
+
+      const filterJson    = '[{"operator":"$in","field":"status","value":["confirmed"]}]';
+      const filterEncoded = encodeURIComponent(filterJson);
+      const fields        = [
+        'status', 'checkIn', 'checkOut', 'nightsCount',
+        'listingId', 'integration.platform',
+        'money.netIncome', 'money.fareCleaning', 'money.ownerRevenue',
+        'money.payments.fees', 'guestStay.createdAt'
+      ].join('%20');
+
+      const guestyUrl = `https://open-api.guesty.com/v1/reservations?fields=${fields}&sort=-checkIn&limit=100&filters=${filterEncoded}`;
+      const guestyResp = await guestyGet(token, guestyUrl);
+      const guestyList  = guestyResp.results || [];
+
+      log.push({ type: 'ok', msg: `${guestyList.length} réservation(s) confirmée(s) reçue(s) depuis Guesty.` });
+
+      // Construire la Map Guesty : clé composite → objet résa (résumé)
+      // On ne résout le nom listing que si le listing est connu
+      const guestyMap = new Map();   // clé composite → { id, listingNom, platform, dateDebut, duree }
+      const guestyUnknownListings = new Set();
+
+      for (const g of guestyList) {
+        const listingInfo = dicListings.get(g.listingId);
+        if (!listingInfo) {
+          // Listing inconnu localement → on log une fois et on ignore (comme VBA Stop)
+          if (!guestyUnknownListings.has(g.listingId)) {
+            log.push({ type: 'warn', msg: `Listing inconnu [${g.listingId}] — réservations ignorées (faire MAJ Propriétés d'abord)` });
+            guestyUnknownListings.add(g.listingId);
+          }
+          continue;
+        }
+        const dateDebut = isoToDate(g.checkIn);
+        const platform  = (g.integration && g.integration.platform) ? g.integration.platform : '';
+        const duree     = g.nightsCount || 0;
+        const k         = keyOf(listingInfo.nom, platform, dateDebut, duree);
+        guestyMap.set(k, { id: g._id, listingId: g.listingId, listingNom: listingInfo.nom, platform, dateDebut, duree });
+      }
+
+      // ── ÉTAPE 2 : CompareResasDansGuesty — Guesty → local ────────────────────
+      // Construire l'index local (clé composite → id résa)
+      const localRows = query(`
+        SELECT r.id, l.nom AS listing_nom, r.plateforme, r.date_debut, r.duree
+        FROM reservations r
+        JOIN listings l ON r.listing_id = l.id
+      `);
+      const localMap = new Map();
+      for (const r of localRows) {
+        const k = keyOf(r.listing_nom, r.plateforme, r.date_debut, r.duree);
+        localMap.set(k, r.id);
+      }
+
+      let nbAjout = 0, nbSuppr = 0, nbInchange = 0;
+
+      // Pour chaque résa Guesty absente en local → récupérer le détail et insérer
+      for (const [k, g] of guestyMap) {
+        if (localMap.has(k)) {
+          nbInchange++;
+          continue;
+        }
+
+        // ── GuestyGetReservation : appel détail ─────────────────────────────
+        log.push({ type: 'info', msg: `Ajout réservation [${g.id}] "${g.listingNom}" le ${g.dateDebut}…` });
+        try {
+          const detailResp = await guestyGet(token, `https://open-api.guesty.com/v1/reservations/${g.id}`);
+          const d = detailResp;
+
+          // Récupération des champs financiers (logique GuestyGetReservation)
+          const menage       = toMoney(d.money && d.money.fareCleaning);
+          const netIncome    = toMoney(d.money && d.money.netIncome);
+          const ownerRevenue = toMoney(d.money && d.money.ownerRevenue);
+
+          // Fees : money.payments[0].fees[0].amount (si présent)
+          let fees = 0;
+          try {
+            const p = d.money && d.money.payments;
+            if (Array.isArray(p) && p[0] && Array.isArray(p[0].fees) && p[0].fees[0]) {
+              fees = toMoney(p[0].fees[0].amount);
+            }
+          } catch (_) { fees = 0; }
+
+          const prix_total = netIncome + menage;
+          const commission = (prix_total - ownerRevenue) + fees;
+
+          // comm = taux HOBE du listing (stocké en décimal, ex 0.15)
+          const listingInfo = dicListings.get(g.listingId);
+          const commRate    = listingInfo && listingInfo.comm != null ? listingInfo.comm : 0;
+
+          // Calculs VBA GuestyAddReservation
+          const versement  = commRate < 1
+            ? (prix_total - menage - commission) * (1 - commRate)
+            : 0;
+          const hobe = commRate < 1
+            ? menage + versement * commRate / (1 - commRate)
+            : menage;
+          const prix_nuit  = g.duree > 0 ? prix_total / g.duree : 0;
+
+          // Dates (VBA : Int() tronque l'heure → on prend slice(0,10))
+          const dateDebut    = isoToDate(d.checkIn);
+          const bookingDate  = isoToDate(d.guestStay && d.guestStay.createdAt);
+          const platform     = d.integration && d.integration.platform ? d.integration.platform : g.platform;
+
+          // INSERT (identique à l'ordre des colonnes init-db.js)
+          run(
+            `INSERT OR IGNORE INTO reservations
+               (id, listing_id, plateforme, date_debut, duree, prix_nuit,
+                prix_total, menage, commission, hobe, versement, booking_date)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+            [
+              g.id, g.listingId, platform, dateDebut, g.duree,
+              Math.round(prix_nuit * 100) / 100,
+              Math.round(prix_total * 100) / 100,
+              Math.round(menage * 100) / 100,
+              Math.round(commission * 100) / 100,
+              Math.round(hobe * 100) / 100,
+              Math.round(versement * 100) / 100,
+              bookingDate
+            ]
+          );
+
+          log.push({ type: 'ajout', msg: `AJOUT    "${g.listingNom}" le ${dateDebut} (${g.duree}n) — versement: ${Math.round(versement)} €` });
+          nbAjout++;
+
+        } catch (detailErr) {
+          log.push({ type: 'warn', msg: `SKIP [${g.id}] — erreur détail : ${detailErr.message}` });
+        }
+      }
+
+      // ── ÉTAPE 3 : CompareGuestyDansResas — local → Guesty ────────────────────
+      // On trie les réservations locales par date_debut DESC (comme VBA TriListeResas)
+      // On ne supprime que celles dans les 20 derniers jours
+      // Dès qu'on dépasse 20 jours → on arrête (Exit For du VBA)
+      const today     = new Date();
+      today.setHours(0, 0, 0, 0);
+      const limite20j = new Date(today.getTime() - 20 * 24 * 60 * 60 * 1000);
+
+      const localRowsSorted = query(`
+        SELECT r.id, l.nom AS listing_nom, r.plateforme, r.date_debut, r.duree
+        FROM reservations r
+        JOIN listings l ON r.listing_id = l.id
+        ORDER BY r.date_debut DESC
+      `);
+
+      for (const r of localRowsSorted) {
+        const dateDebut = new Date(r.date_debut);
+        // Si la date est plus vieille que 20 jours → stop (comme VBA Exit For)
+        if (dateDebut < limite20j) break;
+
+        const k = keyOf(r.listing_nom, r.plateforme, r.date_debut, r.duree);
+        if (!guestyMap.has(k)) {
+          // Absent de Guesty → supprimer (comme VBA GuestyRemoveReservation)
+          run('DELETE FROM reservations WHERE id=?', [r.id]);
+          log.push({ type: 'suppr', msg: `SUPPRIMÉ "${r.listing_nom}" le ${r.date_debut} (${r.duree}n) — absent de Guesty` });
+          nbSuppr++;
+        }
+      }
+
+      log.push({ type: 'info', msg: '─────────────────────────────' });
+      log.push({ type: 'ok', msg: `Résumé : ${nbAjout} ajout(s), ${nbSuppr} suppression(s), ${nbInchange} inchangé(s).` });
+
+    } catch (err) {
+      log.push({ type: 'err', msg: `ERREUR : ${err.message}` });
+      console.error('[maj-reservations]', err);
+    }
+
+    res.send(pageShell(
+      'MAJ Réservations',
+      'Synchronisation avec l\'API Guesty — table <code>reservations</code>',
+      `<div class="card">
+        <h2>Lancer une nouvelle synchronisation</h2>
+        <div class="notice">⚠️ Suppressions limitées aux 20 derniers jours. Nouveaux ajouts recalculés.</div>
+        <form method="POST" action="/maj-reservations">
           <button type="submit" class="btn btn-gold">🔄 Synchroniser à nouveau</button>
         </form>
         <a href="/" class="btn btn-back">← Accueil</a>
@@ -532,7 +824,7 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
 
   // ── Démarrage ──────────────────────────────────────────────────────────────
   app.listen(PORT, () => {
-    console.log(`🚀  Suivi Réservations  →  http://localhost:${PORT}  (v0.2.2)`);
+    console.log(`🚀  Suivi Réservations  →  http://localhost:${PORT}  (v0.2.3)`);
     console.log(`    Réseau local        →  http://Black6:${PORT}`);
   });
 }
