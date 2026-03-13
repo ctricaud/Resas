@@ -555,18 +555,23 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       'Synchronisation avec l\'API Guesty — table <code>reservations</code>',
       `<div class="card">
         <h2>Synchronisation partielle (recommandée)</h2>
-        <p>Récupère les <strong>500 dernières</strong> réservations confirmées depuis Guesty.</p>
+        <p>Récupère les dernières réservations confirmées depuis Guesty.</p>
         <div class="notice">
           Les nouvelles réservations sont ajoutées. Les suppressions ne sont contrôlées que sur les <strong>20 derniers jours</strong>.
         </div>
-        <form method="POST" action="/maj-reservations" style="display:inline">
+        <form method="POST" action="/maj-reservations">
+          <label style="color:#bbb;font-size:.9rem;display:block;margin-bottom:.6rem">
+            Nombre de pages à charger (1 page = 100 réservations) :
+            <input type="number" name="nb_pages" value="5" min="1" max="50"
+              style="margin-left:.5rem;width:70px;background:#1e1e1e;border:1px solid #444;border-radius:6px;color:#eee;padding:.3rem .5rem;font-size:.95rem">
+          </label>
           <button type="submit" class="btn btn-gold">🔄 Synchroniser maintenant</button>
         </form>
-        <a href="/" class="btn btn-back">← Accueil</a>
+        <a href="/" class="btn btn-back" style="margin-left:1rem">← Accueil</a>
       </div>
       <div class="card">
         <h2>Réinitialisation complète</h2>
-        <p>Efface les <strong>${nbLocal} réservation(s)</strong> locales et recharge depuis Guesty avec les calculs corrigés.</p>
+        <p>Efface les <strong>${nbLocal} réservation(s)</strong> locales et recharge toutes les réservations depuis Guesty.</p>
         <div class="notice">
           ⚠️ Opération irréversible — à utiliser pour corriger des calculs incorrects en base.
         </div>
@@ -588,16 +593,17 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       const listingRows = query('SELECT id, nom, comm FROM listings');
       const dicListings  = new Map(listingRows.map(r => [r.id, { nom: r.nom, comm: r.comm }]));
 
-      // ── ÉTAPE 1 : Chargement des 500 dernières réservations confirmed ─────────
-      const MAX_RESERVATIONS = 500;
-      const filterEncoded = encodeURIComponent('[{"operator":"$in","field":"status","value":["confirmed"]}]');
+      // ── ÉTAPE 1 : Chargement des N dernières réservations confirmed ──────────
+      const nbPages        = Math.max(1, Math.min(50, parseInt(req.body.nb_pages, 10) || 5));
+      const MAX_RESERVATIONS = nbPages * 100;
+      const filterEncoded  = encodeURIComponent('[{"operator":"$in","field":"status","value":["confirmed"]}]');
       const fields = 'status%20checkIn%20nightsCount%20listingId%20integration.platform';
       const PAGE   = 100;
       let skip     = 0;
       let total    = Infinity;
       const guestyList = [];
 
-      log.push({ type: 'info', msg: `Chargement des réservations confirmées (max ${MAX_RESERVATIONS})…` });
+      log.push({ type: 'info', msg: `Chargement des réservations confirmées (${nbPages} page(s), max ${MAX_RESERVATIONS})…` });
 
       while (guestyList.length < Math.min(total, MAX_RESERVATIONS)) {
         const url  = `https://open-api.guesty.com/v1/reservations?fields=${fields}&sort=-checkIn&limit=${PAGE}&skip=${skip}&filters=${filterEncoded}`;
@@ -728,8 +734,13 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       'Synchronisation avec l\'API Guesty — table <code>reservations</code>',
       `<div class="card">
         <h2>Lancer une nouvelle synchronisation</h2>
-        <div class="notice">⚠️ Dernières 500 résas Guesty — fenêtre 20 jours pour les suppressions.</div>
-        <form method="POST" action="/maj-reservations" style="display:inline">
+        <div class="notice">Fenêtre 20 jours pour les suppressions.</div>
+        <form method="POST" action="/maj-reservations">
+          <label style="color:#bbb;font-size:.9rem;display:block;margin-bottom:.6rem">
+            Nombre de pages (1 page = 100 réservations) :
+            <input type="number" name="nb_pages" value="${nbPages}" min="1" max="50"
+              style="margin-left:.5rem;width:70px;background:#1e1e1e;border:1px solid #444;border-radius:6px;color:#eee;padding:.3rem .5rem;font-size:.95rem">
+          </label>
           <button type="submit" class="btn btn-gold">🔄 Synchroniser à nouveau</button>
         </form>
         <a href="/maj-reservations-full" class="btn btn-back" style="margin-left:1rem">🗑️ Réinitialisation complète</a>
