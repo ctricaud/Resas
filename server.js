@@ -582,6 +582,7 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
 
   app.post('/maj-reservations', async (req, res) => {
     const log = [];
+    const nbPages = Math.max(1, Math.min(50, parseInt(req.body.nb_pages, 10) || 5));
     log.push({ type: 'info', msg: `Synchronisation démarrée le ${new Date().toLocaleString('fr-FR')}` });
 
     try {
@@ -594,7 +595,6 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       const dicListings  = new Map(listingRows.map(r => [r.id, { nom: r.nom, comm: r.comm }]));
 
       // ── ÉTAPE 1 : Chargement des N dernières réservations confirmed ──────────
-      const nbPages        = Math.max(1, Math.min(50, parseInt(req.body.nb_pages, 10) || 5));
       const MAX_RESERVATIONS = nbPages * 100;
       const filterEncoded  = encodeURIComponent('[{"operator":"$in","field":"status","value":["confirmed"]}]');
       const fields = 'status%20checkIn%20nightsCount%20listingId%20integration.platform';
