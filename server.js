@@ -90,6 +90,70 @@ async function startServer() {
     return resp.json();
   }
 
+  // ── Helpers partagés réservations ────────────────────────────────────────────
+
+  // Clé composite identique au VBA KeyOf
+  function keyOf(listingNom, platform, dateDebut, duree) {
+    const d  = new Date(dateDebut);
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${listingNom}|${platform}|${yy}${mm}${dd}|${duree}`;
+  }
+
+  // ISO8601 → "YYYY-MM-DD" (comme VBA Int() qui tronque l'heure)
+  function isoToDate(iso) {
+    if (!iso) return null;
+    return iso.slice(0, 10);
+  }
+
+  // Valeur monétaire robuste
+  function toMoney(val) {
+    if (val == null || val === '') return 0;
+    return parseFloat(String(val).replace(',', '.')) || 0;
+  }
+
+  // ── Calcul financier — logique VBA GuestyAddReservation ─────────────────────
+  // VBA GuestyGetReservation :
+  //   Prix     = fareAccommodationAdjusted + fareCleaning
+  //   FraisChannel = hostServiceFee + fees[0].amount
+  // VBA GuestyAddReservation :
+  //   Versement    = (Prix - Ménage - FraisChannel) * (1 - Comm)
+  //   Conciergerie = Ménage + Versement * Comm / (1 - Comm)
+  //   PrixNuit     = Prix / NbNuits
+  function calcFinances(d, duree, commRate) {
+    const menage     = toMoney(d.money && d.money.fareCleaning);
+    const fareAccom  = toMoney(d.money && d.money.fareAccommodationAdjusted);
+    const hostSvcFee = toMoney(d.money && d.money.hostServiceFee);
+    let fees = 0;
+    try {
+      const p = d.money && d.money.payments;
+      if (Array.isArray(p) && p[0] && Array.isArray(p[0].fees) && p[0].fees[0]) {
+        fees = toMoney(p[0].fees[0].amount);
+      }
+    } catch (_) { fees = 0; }
+
+    const prix_total = fareAccom + menage;     // "Prix" VBA
+    const commission = hostSvcFee + fees;      // "Frais channel" VBA
+    const rate       = (commRate != null && commRate < 1) ? commRate : 0;
+    const versement  = rate > 0
+      ? (prix_total - menage - commission) * (1 - rate)
+      : (prix_total - menage - commission);
+    const hobe = rate > 0
+      ? menage + versement * rate / (1 - rate)
+      : menage;
+    const prix_nuit = duree > 0 ? prix_total / duree : 0;
+
+    return {
+      prix_total : Math.round(prix_total * 100) / 100,
+      menage     : Math.round(menage     * 100) / 100,
+      commission : Math.round(commission * 100) / 100,
+      hobe       : Math.round(hobe       * 100) / 100,
+      versement  : Math.round(versement  * 100) / 100,
+      prix_nuit  : Math.round(prix_nuit  * 100) / 100,
+    };
+  }
+
   // ── Helpers HTML ──────────────────────────────────────────────────────────────
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -485,20 +549,28 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
   // ═══════════════════════════════════════════════════════════════════════════
 
   app.get('/maj-reservations', (req, res) => {
+    const nbLocal = query('SELECT COUNT(*) AS c FROM reservations')[0].c;
     res.send(pageShell(
       'MAJ Réservations',
       'Synchronisation avec l\'API Guesty — table <code>reservations</code>',
       `<div class="card">
-        <h2>Lancer la synchronisation</h2>
-        <p>Récupère <strong>toutes</strong> les réservations confirmées depuis Guesty (pagination complète).</p>
+        <h2>Synchronisation partielle (recommandée)</h2>
+        <p>Récupère les <strong>500 dernières</strong> réservations confirmées depuis Guesty.</p>
         <div class="notice">
-          ⚠️ Les réservations absentes de Guesty sont supprimées.<br>
-          Les nouvelles réservations sont ajoutées avec recalcul complet des montants.
+          Les nouvelles réservations sont ajoutées. Les suppressions ne sont contrôlées que sur les <strong>20 derniers jours</strong>.
         </div>
-        <form method="POST" action="/maj-reservations">
+        <form method="POST" action="/maj-reservations" style="display:inline">
           <button type="submit" class="btn btn-gold">🔄 Synchroniser maintenant</button>
         </form>
         <a href="/" class="btn btn-back">← Accueil</a>
+      </div>
+      <div class="card">
+        <h2>Réinitialisation complète</h2>
+        <p>Efface les <strong>${nbLocal} réservation(s)</strong> locales et recharge depuis Guesty avec les calculs corrigés.</p>
+        <div class="notice">
+          ⚠️ Opération irréversible — à utiliser pour corriger des calculs incorrects en base.
+        </div>
+        <a href="/maj-reservations-full" class="btn btn-back">🗑️ Réinitialiser la base</a>
       </div>`
     ));
   });
@@ -506,27 +578,6 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
   app.post('/maj-reservations', async (req, res) => {
     const log = [];
     log.push({ type: 'info', msg: `Synchronisation démarrée le ${new Date().toLocaleString('fr-FR')}` });
-
-    // ── Helper : clé composite identique au VBA KeyOf ────────────────────────
-    function keyOf(listingNom, platform, dateDebut, duree) {
-      const d    = new Date(dateDebut);
-      const yyyy = d.getFullYear();
-      const mm   = String(d.getMonth() + 1).padStart(2, '0');
-      const dd   = String(d.getDate()).padStart(2, '0');
-      return `${listingNom}|${platform}|${yyyy}${mm}${dd}|${duree}`;
-    }
-
-    // ── Helper : ISO8601 → "YYYY-MM-DD" (comme VBA Int() qui tronque l'heure) ─
-    function isoToDate(iso) {
-      if (!iso) return null;
-      return iso.slice(0, 10);
-    }
-
-    // ── Helper : montant financier ────────────────────────────────────────────
-    function toMoney(val) {
-      if (val == null || val === '') return 0;
-      return parseFloat(String(val).replace(',', '.')) || 0;
-    }
 
     try {
       log.push({ type: 'info', msg: 'Récupération du token Guesty…' });
@@ -537,7 +588,8 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       const listingRows = query('SELECT id, nom, comm FROM listings');
       const dicListings  = new Map(listingRows.map(r => [r.id, { nom: r.nom, comm: r.comm }]));
 
-      // ── ÉTAPE 1 : Pagination complète — toutes les réservations confirmed ────
+      // ── ÉTAPE 1 : Chargement des 500 dernières réservations confirmed ─────────
+      const MAX_RESERVATIONS = 500;
       const filterEncoded = encodeURIComponent('[{"operator":"$in","field":"status","value":["confirmed"]}]');
       const fields = 'status%20checkIn%20nightsCount%20listingId%20integration.platform';
       const PAGE   = 100;
@@ -545,21 +597,22 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       let total    = Infinity;
       const guestyList = [];
 
-      log.push({ type: 'info', msg: 'Chargement de toutes les réservations confirmées (pagination)…' });
+      log.push({ type: 'info', msg: `Chargement des réservations confirmées (max ${MAX_RESERVATIONS})…` });
 
-      while (guestyList.length < total) {
+      while (guestyList.length < Math.min(total, MAX_RESERVATIONS)) {
         const url  = `https://open-api.guesty.com/v1/reservations?fields=${fields}&sort=-checkIn&limit=${PAGE}&skip=${skip}&filters=${filterEncoded}`;
         const resp = await guestyGet(token, url);
         const results = resp.results || [];
         if (skip === 0) {
           total = resp.count || resp.total || results.length;
-          log.push({ type: 'info', msg: `Total annoncé par Guesty : ${total} réservation(s).` });
+          log.push({ type: 'info', msg: `Total Guesty : ${total} — chargement limité à ${MAX_RESERVATIONS}.` });
         }
         guestyList.push(...results);
-        if (results.length < PAGE) break;
+        if (results.length < PAGE || guestyList.length >= MAX_RESERVATIONS) break;
         skip += PAGE;
-        log.push({ type: 'info', msg: `  … ${guestyList.length} / ${total} chargée(s)` });
+        log.push({ type: 'info', msg: `  … ${guestyList.length} / ${Math.min(total, MAX_RESERVATIONS)} chargée(s)` });
       }
+      if (guestyList.length > MAX_RESERVATIONS) guestyList.length = MAX_RESERVATIONS;
 
       log.push({ type: 'ok', msg: `${guestyList.length} réservation(s) confirmée(s) chargée(s) depuis Guesty.` });
 
@@ -610,31 +663,9 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
         try {
           const d = await guestyGet(token, `https://open-api.guesty.com/v1/reservations/${g.id}`);
 
-          const menage       = toMoney(d.money && d.money.fareCleaning);
-          const netIncome    = toMoney(d.money && d.money.netIncome);
-          const ownerRevenue = toMoney(d.money && d.money.ownerRevenue);
-
-          let fees = 0;
-          try {
-            const p = d.money && d.money.payments;
-            if (Array.isArray(p) && p[0] && Array.isArray(p[0].fees) && p[0].fees[0]) {
-              fees = toMoney(p[0].fees[0].amount);
-            }
-          } catch (_) { fees = 0; }
-
-          const prix_total = netIncome + menage;
-          const commission = (prix_total - ownerRevenue) + fees;
-
           const listingInfo = dicListings.get(g.listingId);
           const commRate    = (listingInfo && listingInfo.comm != null) ? listingInfo.comm : 0;
-
-          const versement = commRate < 1
-            ? (prix_total - menage - commission) * (1 - commRate)
-            : 0;
-          const hobe = commRate < 1
-            ? menage + versement * commRate / (1 - commRate)
-            : menage;
-          const prix_nuit = g.duree > 0 ? prix_total / g.duree : 0;
+          const fin         = calcFinances(d, g.duree, commRate);
 
           const dateDebut   = isoToDate(d.checkIn);
           const bookingDate = isoToDate(d.guestStay && d.guestStay.createdAt);
@@ -647,16 +678,12 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
             [
               g.id, g.listingId, platform, dateDebut, g.duree,
-              Math.round(prix_nuit   * 100) / 100,
-              Math.round(prix_total  * 100) / 100,
-              Math.round(menage      * 100) / 100,
-              Math.round(commission  * 100) / 100,
-              Math.round(hobe        * 100) / 100,
-              Math.round(versement   * 100) / 100,
+              fin.prix_nuit, fin.prix_total, fin.menage,
+              fin.commission, fin.hobe, fin.versement,
               bookingDate
             ]
           );
-          log.push({ type: 'ajout', msg: `AJOUT    "${g.listingNom}" le ${dateDebut} (${g.duree}n) — versement: ${Math.round(versement)} €` });
+          log.push({ type: 'ajout', msg: `AJOUT    "${g.listingNom}" le ${dateDebut} (${g.duree}n) — versement: ${Math.round(fin.versement)} €` });
           nbAjout++;
 
         } catch (detailErr) {
@@ -665,13 +692,19 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       }
 
       // ── ÉTAPE 3 : CompareGuestyDansResas — local → Guesty ────────────────────
-      // On a TOUTES les résas Guesty → on peut supprimer sans limite de date
+      // On ne contrôle que les réservations des 20 derniers jours (comme VBA > 60j ignorées)
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 20);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      log.push({ type: 'info', msg: `Vérification des suppressions depuis le ${cutoffStr} (fenêtre 20 jours).` });
+
       const localRowsSorted = query(`
         SELECT r.id, l.nom AS listing_nom, r.plateforme, r.date_debut, r.duree
         FROM reservations r
         JOIN listings l ON r.listing_id = l.id
+        WHERE r.date_debut >= ?
         ORDER BY r.date_debut DESC
-      `);
+      `, [cutoffStr]);
 
       for (const r of localRowsSorted) {
         const k = keyOf(r.listing_nom, r.plateforme, r.date_debut, r.duree);
@@ -695,10 +728,171 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       'Synchronisation avec l\'API Guesty — table <code>reservations</code>',
       `<div class="card">
         <h2>Lancer une nouvelle synchronisation</h2>
-        <div class="notice">⚠️ Toutes les résas Guesty chargées — suppressions et ajouts exacts.</div>
-        <form method="POST" action="/maj-reservations">
+        <div class="notice">⚠️ Dernières 500 résas Guesty — fenêtre 20 jours pour les suppressions.</div>
+        <form method="POST" action="/maj-reservations" style="display:inline">
           <button type="submit" class="btn btn-gold">🔄 Synchroniser à nouveau</button>
         </form>
+        <a href="/maj-reservations-full" class="btn btn-back" style="margin-left:1rem">🗑️ Réinitialisation complète</a>
+        <a href="/" class="btn btn-back">← Accueil</a>
+      </div>
+      <div class="card">
+        <h2>Journal des opérations</h2>
+        <div class="log-box">${renderLogBox(log)}</div>
+      </div>`
+    ));
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ── Réinitialisation complète (/maj-reservations-full) ──────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Efface TOUTES les réservations locales puis recharge depuis Guesty (max 500)
+  // avec les calculs corrigés. Utile pour corriger les mauvais calculs en base.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get('/maj-reservations-full', (req, res) => {
+    const nbLocal = query('SELECT COUNT(*) AS c FROM reservations')[0].c;
+    res.send(pageShell(
+      'Réinitialisation Réservations',
+      'Effacement complet + rechargement depuis Guesty',
+      `<div class="card">
+        <h2>Attention — opération irréversible</h2>
+        <p>Cette opération va :</p>
+        <p>1. Supprimer les <strong>${nbLocal} réservation(s)</strong> actuellement en base.</p>
+        <p>2. Recharger jusqu'à <strong>500 réservations confirmées</strong> depuis Guesty.</p>
+        <p>3. Recalculer tous les montants avec l'algorithme corrigé.</p>
+        <div class="notice">
+          ⚠️ Toutes les données locales seront perdues et remplacées par les données Guesty.<br>
+          Cette opération est recommandée si les calculs précédents étaient incorrects.
+        </div>
+        <form method="POST" action="/maj-reservations-full" style="display:inline">
+          <button type="submit" class="btn btn-gold">🗑️ Confirmer la réinitialisation</button>
+        </form>
+        <a href="/maj-reservations" class="btn btn-back">← Annuler</a>
+      </div>`
+    ));
+  });
+
+  app.post('/maj-reservations-full', async (req, res) => {
+    const log = [];
+    log.push({ type: 'info', msg: `Réinitialisation démarrée le ${new Date().toLocaleString('fr-FR')}` });
+
+    try {
+      log.push({ type: 'info', msg: 'Récupération du token Guesty…' });
+      const token = await getGuestyToken();
+      log.push({ type: 'ok', msg: 'Token obtenu.' });
+
+      // ── Dictionnaire listings ─────────────────────────────────────────────────
+      const listingRows = query('SELECT id, nom, comm FROM listings');
+      const dicListings  = new Map(listingRows.map(r => [r.id, { nom: r.nom, comm: r.comm }]));
+
+      if (listingRows.length === 0) {
+        throw new Error('Aucun listing en base — faire d\'abord MAJ Propriétés.');
+      }
+
+      // ── Chargement des réservations Guesty (max 500) ──────────────────────────
+      const MAX_RESERVATIONS = 500;
+      const filterEncoded = encodeURIComponent('[{"operator":"$in","field":"status","value":["confirmed"]}]');
+      const fields = 'status%20checkIn%20nightsCount%20listingId%20integration.platform';
+      const PAGE   = 100;
+      let skip     = 0;
+      let total    = Infinity;
+      const guestyList = [];
+
+      log.push({ type: 'info', msg: `Chargement des réservations confirmées (max ${MAX_RESERVATIONS})…` });
+
+      while (guestyList.length < Math.min(total, MAX_RESERVATIONS)) {
+        const url  = `https://open-api.guesty.com/v1/reservations?fields=${fields}&sort=-checkIn&limit=${PAGE}&skip=${skip}&filters=${filterEncoded}`;
+        const resp = await guestyGet(token, url);
+        const results = resp.results || [];
+        if (skip === 0) {
+          total = resp.count || resp.total || results.length;
+          log.push({ type: 'info', msg: `Total Guesty : ${total} — chargement limité à ${MAX_RESERVATIONS}.` });
+        }
+        guestyList.push(...results);
+        if (results.length < PAGE || guestyList.length >= MAX_RESERVATIONS) break;
+        skip += PAGE;
+        log.push({ type: 'info', msg: `  … ${guestyList.length} / ${Math.min(total, MAX_RESERVATIONS)} chargée(s)` });
+      }
+      if (guestyList.length > MAX_RESERVATIONS) guestyList.length = MAX_RESERVATIONS;
+
+      log.push({ type: 'ok', msg: `${guestyList.length} réservation(s) chargée(s).` });
+
+      if (guestyList.length === 0) {
+        throw new Error('Guesty a retourné 0 réservation — réinitialisation annulée pour protéger les données.');
+      }
+
+      // ── Effacement de la base ─────────────────────────────────────────────────
+      const nbAvant = query('SELECT COUNT(*) AS c FROM reservations')[0].c;
+      run('DELETE FROM reservations');
+      log.push({ type: 'suppr', msg: `${nbAvant} réservation(s) supprimée(s) de la base locale.` });
+
+      // ── Insertion de toutes les réservations Guesty ───────────────────────────
+      const unknownListings = new Set();
+      let nbAjout = 0, nbSkip = 0;
+
+      for (const g of guestyList) {
+        const listingInfo = dicListings.get(g.listingId);
+        if (!listingInfo) {
+          if (!unknownListings.has(g.listingId)) {
+            log.push({ type: 'warn', msg: `Listing inconnu [${g.listingId}] — réservations ignorées (faire MAJ Propriétés d'abord)` });
+            unknownListings.add(g.listingId);
+          }
+          nbSkip++;
+          continue;
+        }
+
+        const dateDebut = isoToDate(g.checkIn);
+        const platform  = (g.integration && g.integration.platform) ? g.integration.platform : '';
+        const duree     = g.nightsCount || 0;
+
+        log.push({ type: 'info', msg: `Chargement [${g._id}] "${listingInfo.nom}" le ${dateDebut}…` });
+        try {
+          const d = await guestyGet(token, `https://open-api.guesty.com/v1/reservations/${g._id}`);
+
+          const commRate = listingInfo.comm != null ? listingInfo.comm : 0;
+          const fin      = calcFinances(d, duree, commRate);
+
+          const dateDebutDetail = isoToDate(d.checkIn);
+          const bookingDate     = isoToDate(d.guestStay && d.guestStay.createdAt);
+          const platformDetail  = (d.integration && d.integration.platform) ? d.integration.platform : platform;
+
+          run(
+            `INSERT OR IGNORE INTO reservations
+               (id, listing_id, plateforme, date_debut, duree, prix_nuit,
+                prix_total, menage, commission, hobe, versement, booking_date)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+            [
+              g._id, g.listingId, platformDetail, dateDebutDetail, duree,
+              fin.prix_nuit, fin.prix_total, fin.menage,
+              fin.commission, fin.hobe, fin.versement,
+              bookingDate
+            ]
+          );
+          log.push({ type: 'ajout', msg: `AJOUT  "${listingInfo.nom}" le ${dateDebutDetail} (${duree}n) — versement: ${Math.round(fin.versement)} €` });
+          nbAjout++;
+
+        } catch (detailErr) {
+          log.push({ type: 'warn', msg: `SKIP [${g._id}] — ${detailErr.message}` });
+          nbSkip++;
+        }
+      }
+
+      log.push({ type: 'info', msg: '─────────────────────────────' });
+      log.push({ type: 'ok', msg: `Réinitialisation terminée : ${nbAjout} insertion(s), ${nbSkip} ignorée(s).` });
+
+    } catch (err) {
+      log.push({ type: 'err', msg: `ERREUR : ${err.message}` });
+      console.error('[maj-reservations-full]', err);
+    }
+
+    res.send(pageShell(
+      'Réinitialisation Réservations',
+      'Effacement complet + rechargement depuis Guesty',
+      `<div class="card">
+        <h2>Opérations disponibles</h2>
+        <a href="/maj-reservations-full" class="btn btn-gold">🗑️ Nouvelle réinitialisation</a>
+        <a href="/maj-reservations" class="btn btn-back" style="margin-left:1rem">🔄 Sync partielle</a>
         <a href="/" class="btn btn-back">← Accueil</a>
       </div>
       <div class="card">
