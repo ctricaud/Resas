@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Suivi Réservations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:#0a0a0a; --surface:#141414; --surface-hi:#1e1e1e;
+      --border:#2a2a2a; --border-hi:#3a3a3a;
+      --gold:#f0b429; --gold-dim:#a07010;
+      --blue:#3b9eff; --blue-dim:#1a5fa0; --blue-glow:rgba(59,158,255,0.18);
+      --text:#f0f0f0; --text-dim:#888; --text-faint:#444;
+      --green:#2ecc71; --radius-lg:18px;
+      --font-title:'Bebas Neue',sans-serif; --font-ui:'Nunito',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--font-ui);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:3rem 1.5rem 5rem;}
+    .site-header{text-align:center;margin-bottom:3.5rem;}
+    .logo{font-family:var(--font-title);font-size:clamp(2.8rem,7vw,5rem);letter-spacing:0.12em;color:var(--gold);text-shadow:0 0 30px rgba(240,180,41,0.5),0 0 80px rgba(240,180,41,0.15);line-height:1;margin-bottom:0.5rem;}
+    .tagline{font-size:0.8rem;font-weight:600;letter-spacing:0.3em;text-transform:uppercase;color:var(--text-dim);}
+    .divider{width:100%;max-width:680px;height:1px;background:linear-gradient(90deg,transparent,var(--border-hi),transparent);margin-bottom:3rem;}
+    .dashboard{display:grid;grid-template-columns:1fr 1fr;gap:2rem;width:100%;max-width:780px;align-items:start;}
+    .col{display:flex;flex-direction:column;gap:0;}
+    .col-title{font-family:var(--font-title);font-size:0.85rem;letter-spacing:0.35em;color:var(--text-faint);text-transform:uppercase;margin-bottom:0.9rem;padding-left:0.2rem;}
+    .action-group{border:1.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface);}
+    .action-btn{display:flex;align-items:center;gap:0.9rem;width:100%;padding:1rem 1.3rem;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-family:var(--font-ui);cursor:pointer;text-align:left;transition:background 0.15s,padding-left 0.15s;text-decoration:none;}
+    .action-btn:last-child{border-bottom:none;}
+    .action-btn:hover{background:var(--surface-hi);padding-left:1.7rem;}
+    .action-icon{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;transition:transform 0.15s;}
+    .action-btn:hover .action-icon{transform:scale(1.12);}
+    .action-label{flex:1;line-height:1.2;font-size:1.05rem;font-weight:800;}
+    .action-sublabel{display:block;font-size:0.78rem;font-weight:600;color:var(--text-dim);letter-spacing:0.05em;margin-top:0.15rem;}
+    .action-arrow{font-size:0.8rem;color:var(--text-faint);transition:color 0.15s,transform 0.15s;}
+    .action-btn:hover .action-arrow{color:var(--text-dim);transform:translateX(3px);}
+    .icon-gold{background:rgba(240,180,41,0.12);color:var(--gold);}
+    .icon-green{background:rgba(46,204,113,0.12);color:var(--green);}
+    .icon-orange{background:rgba(232,101,26,0.12);color:#e8651a;}
+    .icon-purple{background:rgba(155,89,182,0.12);color:#9b59b6;}
+    .icon-teal{background:rgba(26,188,156,0.12);color:#1abc9c;}
+    .col-featured .action-group{border-color:var(--blue-dim);box-shadow:0 0 28px var(--blue-glow);}
+    .col-featured .action-btn{padding:1.5rem;flex-direction:column;align-items:flex-start;gap:0.6rem;}
+    .col-featured .action-btn:hover{padding-left:1.5rem;background:rgba(59,158,255,0.06);}
+    .col-featured .action-icon{width:48px;height:48px;border-radius:12px;font-size:1.4rem;background:rgba(59,158,255,0.15);color:var(--blue);}
+    .col-featured .action-label{font-size:1.1rem;font-weight:900;color:var(--blue);}
+    .col-featured .action-arrow{align-self:flex-end;color:var(--blue-dim);}
+    .col-featured .action-btn:hover .action-arrow{color:var(--blue);}
+    .site-footer{margin-top:4rem;text-align:center;font-family:var(--font-title);letter-spacing:0.15em;}
+    .site-footer .line1{font-size:0.72rem;color:var(--text-faint);}
+    .site-footer .version{font-size:1rem;color:var(--gold-dim);letter-spacing:0.25em;display:block;margin-top:0.3rem;}
+    @media(max-width:600px){.dashboard{grid-template-columns:1fr;}.col-featured{order:-1;}}
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <h1 class="logo">SUIVI RÉSERVATIONS</h1>
+    <p class="tagline">Gestion multi-plateformes · Multi-propriétaires</p>
+  </header>
+  <div class="divider"></div>
+  <main class="dashboard">
+    <div class="col">
+      <div class="col-title">Gestion</div>
+      <div class="action-group">
+        <a class="action-btn" href="/reservations">
+          <div class="action-icon icon-gold">📋</div>
+          <div class="action-label">Liste des réservations<span class="action-sublabel">Consulter · Filtrer · Trier</span></div>
+          <span class="action-arrow">›</span>
+        </a>
+        <a class="action-btn" href="/listings">
+          <div class="action-icon icon-green">🏠</div>
+          <div class="action-label">Liste des propriétés<span class="action-sublabel">Appartements · Statuts · Détails</span></div>
+          <span class="action-arrow">›</span>
+        </a>
+        <a class="action-btn" href="/owners">
+          <div class="action-icon icon-purple">👤</div>
+          <div class="action-label">Liste des propriétaires<span class="action-sublabel">Contacts · Portefeuille</span></div>
+          <span class="action-arrow">›</span>
+        </a>
+        <div style="height:1px;background:var(--border-hi);"></div>
+        <a class="action-btn" href="/maj-reservations">
+          <div class="action-icon icon-gold">🔄</div>
+          <div class="action-label">MAJ Réservations<span class="action-sublabel">Importer · Modifier · Supprimer</span></div>
+          <span class="action-arrow">›</span>
+        </a>
+        <a class="action-btn" href="/maj-listings">
+          <div class="action-icon icon-orange">✏️</div>
+          <div class="action-label">MAJ Propriétés<span class="action-sublabel">Ajouter · Éditer · Archiver</span></div>
+          <span class="action-arrow">›</span>
+        </a>
+        <a class="action-btn" href="/maj-owners">
+          <div class="action-icon icon-teal">✏️</div>
+          <div class="action-label">MAJ Propriétaires<span class="action-sublabel">Ajouter · Éditer · Archiver</span></div>
+          <span class="action-arrow">›</span>
+        </a>
+      </div>
+    </div>
+    <div class="col col-featured">
+      <div class="col-title">Suivi</div>
+      <div class="action-group">
+        <a class="action-btn" href="/suivi-prises">
+          <div class="action-icon">📈</div>
+          <div class="action-label">Suivi prise de réservation<span class="action-sublabel">Visualiser les réservations entrantes par période, plateforme et propriété.</span></div>
+          <span class="action-arrow">›</span>
+        </a>
+      </div>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <span class="line1">SUIVI RÉSERVATIONS · PORT 3010</span>
+    <span class="version">v0.1.4</span>
+  </footer>
+</body>
+</html>

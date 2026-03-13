@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Propriétaires — Suivi Réservations</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    :root{
+      --bg:#0a0a0a; --surface:#111; --border:#2a2a2a; --border-hi:#3a3a3a;
+      --gold:#f0b429; --gold-dim:#a07010; --gold-light:#ffd166;
+      --text:#f0f0f0; --text-dim:#888; --text-faint:#444;
+      --row-alt:#0d0d0d; --row-hover:#1a1a1a;
+      --font-title:'Bebas Neue',sans-serif; --font-ui:'Nunito',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--font-ui);min-height:100vh;padding:40px 48px 80px;}
+    .back{display:inline-flex;align-items:center;gap:8px;color:var(--gold);text-decoration:none;font-size:16px;font-weight:800;letter-spacing:0.05em;margin-bottom:40px;opacity:0.8;transition:opacity 0.2s;}
+    .back:hover{opacity:1;}
+    .page-title{font-family:var(--font-title);font-size:90px;color:var(--gold);letter-spacing:0.06em;line-height:1;margin-bottom:8px;text-shadow:0 0 40px rgba(240,180,41,0.3);}
+    .page-sub{font-size:20px;color:var(--text-dim);font-weight:700;margin-bottom:44px;letter-spacing:0.04em;}
+    .stats{display:flex;gap:24px;margin-bottom:36px;flex-wrap:wrap;}
+    .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 32px;display:flex;flex-direction:column;gap:6px;}
+    .stat-val{font-family:var(--font-title);font-size:42px;color:var(--gold);letter-spacing:0.04em;}
+    .stat-lbl{font-size:13px;color:var(--text-dim);font-weight:800;text-transform:uppercase;letter-spacing:0.1em;}
+    .table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);}
+    table{width:100%;border-collapse:collapse;}
+    thead tr{background:#161616;border-bottom:2px solid var(--gold);}
+    thead th{
+      font-family:var(--font-title);font-size:26px;color:var(--gold-light);
+      letter-spacing:0.1em;padding:22px 28px;text-align:left;white-space:nowrap;
+      cursor:pointer;user-select:none;transition:color 0.2s;
+    }
+    thead th:hover{color:#fff;}
+    thead th.sorted{color:#fff;}
+    thead th .si{margin-left:6px;opacity:0.4;font-size:15px;}
+    thead th.sorted .si{opacity:1;color:var(--gold);}
+    tbody tr{border-bottom:1px solid var(--border);transition:background 0.15s;}
+    tbody tr:nth-child(even){background:var(--row-alt);}
+    tbody tr:hover{background:var(--row-hover);}
+    tbody td{padding:18px 28px;font-size:18px;font-weight:600;border-right:1px solid var(--border);}
+    tbody td:last-child{border-right:none;}
+    td.nom{font-size:19px;font-weight:900;}
+    td.num{text-align:right;font-weight:900;font-size:20px;color:var(--gold-light);}
+    td.id{font-family:monospace;font-size:13px;color:var(--text-faint);}
+    .loading{padding:80px;text-align:center;color:var(--text-dim);font-size:22px;font-weight:700;}
+    .site-footer{margin-top:60px;text-align:center;font-family:var(--font-title);letter-spacing:0.15em;}
+    .site-footer .line1{font-size:0.72rem;color:var(--text-faint);}
+    .site-footer .version{font-size:1rem;color:var(--gold-dim);letter-spacing:0.25em;display:block;margin-top:0.3rem;}
+  </style>
+</head>
+<body>
+  <a class="back" href="/">← Accueil</a>
+  <div class="page-title">PROPRIÉTAIRES</div>
+  <div class="page-sub">Contacts · Portefeuille · Appartements gérés</div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-val" id="s-total">—</div><div class="stat-lbl">Propriétaires</div></div>
+    <div class="stat"><div class="stat-val" id="s-actifs">—</div><div class="stat-lbl">Avec propriétés</div></div>
+  </div>
+
+  <div class="table-wrap">
+    <div class="loading" id="loading">Chargement…</div>
+    <table id="tbl" style="display:none">
+      <thead>
+        <tr>
+          <th onclick="sortBy('nom')" class="sorted" data-col="nom">NOM <span class="si" id="icon-nom">▲</span></th>
+          <th onclick="sortBy('nb_listings')" data-col="nb_listings">PROPRIÉTÉS <span class="si" id="icon-nb_listings">↕</span></th>
+          <th onclick="sortBy('nb_res')" data-col="nb_res">RÉSERVATIONS <span class="si" id="icon-nb_res">↕</span></th>
+          <th data-col="id">IDENTIFIANT</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <footer class="site-footer">
+    <span class="line1">SUIVI RÉSERVATIONS · PORT 3010</span>
+    <span class="version">v0.1.4</span>
+  </footer>
+
+  <script>
+    let data=[], sortCol='nom', sortAsc=true;
+    async function load(){
+      try{
+        const r=await fetch('/api/owners'); data=await r.json();
+        document.getElementById('s-total').textContent=data.length;
+        document.getElementById('s-actifs').textContent=data.filter(o=>o.nb_listings>0).length;
+        render();
+        document.getElementById('loading').style.display='none';
+        document.getElementById('tbl').style.display='table';
+      }catch(e){document.getElementById('loading').textContent='Erreur : '+e.message;}
+    }
+    function sortBy(col){
+      if(sortCol===col)sortAsc=!sortAsc; else{sortCol=col;sortAsc=true;}
+      document.querySelectorAll('thead th').forEach(t=>t.classList.remove('sorted'));
+      document.querySelector('[data-col="'+col+'"]').classList.add('sorted');
+      document.querySelectorAll('.si').forEach(i=>i.textContent='↕');
+      document.getElementById('icon-'+col).textContent=sortAsc?'▲':'▼';
+      render();
+    }
+    function render(){
+      const s=[...data].sort((a,b)=>{
+        let va=a[sortCol]??'', vb=b[sortCol]??'';
+        if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}
+        return va<vb?(sortAsc?-1:1):va>vb?(sortAsc?1:-1):0;
+      });
+      document.getElementById('tbody').innerHTML=s.map(o=>`
+        <tr>
+          <td class="nom">${o.nom}</td>
+          <td class="num">${o.nb_listings}</td>
+          <td class="num">${o.nb_res}</td>
+          <td class="id">${o.id}</td>
+        </tr>`).join('');
+    }
+    load();
+  </script>
+</body>
+</html>

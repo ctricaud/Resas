@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Propriétés — Suivi Réservations</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    :root{
+      --bg:#0a0a0a; --surface:#111; --border:#2a2a2a; --border-hi:#3a3a3a;
+      --gold:#f0b429; --gold-dim:#a07010; --gold-light:#ffd166;
+      --text:#f0f0f0; --text-dim:#888; --text-faint:#444;
+      --row-alt:#0d0d0d; --row-hover:#1a1a1a;
+      --green:#2ecc71; --red:#e05555;
+      --font-title:'Bebas Neue',sans-serif; --font-ui:'Nunito',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--font-ui);min-height:100vh;padding:40px 48px 80px;}
+    .back{display:inline-flex;align-items:center;gap:8px;color:var(--gold);text-decoration:none;font-size:16px;font-weight:800;letter-spacing:0.05em;margin-bottom:40px;opacity:0.8;transition:opacity 0.2s;}
+    .back:hover{opacity:1;}
+    .page-title{font-family:var(--font-title);font-size:90px;color:var(--gold);letter-spacing:0.06em;line-height:1;margin-bottom:8px;text-shadow:0 0 40px rgba(240,180,41,0.3);}
+    .page-sub{font-size:20px;color:var(--text-dim);font-weight:700;margin-bottom:44px;letter-spacing:0.04em;}
+    .stats{display:flex;gap:24px;margin-bottom:36px;flex-wrap:wrap;}
+    .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 32px;display:flex;flex-direction:column;gap:6px;}
+    .stat-val{font-family:var(--font-title);font-size:42px;color:var(--gold);letter-spacing:0.04em;}
+    .stat-lbl{font-size:13px;color:var(--text-dim);font-weight:800;text-transform:uppercase;letter-spacing:0.1em;}
+    .table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);}
+    table{width:100%;border-collapse:collapse;}
+    thead tr{background:#161616;border-bottom:2px solid var(--gold);}
+    thead th{
+      font-family:var(--font-title);font-size:24px;color:var(--gold-light);
+      letter-spacing:0.1em;padding:22px 24px;text-align:left;white-space:nowrap;
+      cursor:pointer;user-select:none;transition:color 0.2s;
+    }
+    thead th:hover{color:#fff;}
+    thead th.sorted{color:#fff;}
+    thead th .si{margin-left:6px;opacity:0.4;font-size:14px;}
+    thead th.sorted .si{opacity:1;color:var(--gold);}
+    tbody tr{border-bottom:1px solid var(--border);transition:background 0.15s;}
+    tbody tr:nth-child(even){background:var(--row-alt);}
+    tbody tr:hover{background:var(--row-hover);}
+    tbody td{padding:16px 24px;font-size:17px;font-weight:600;border-right:1px solid var(--border);}
+    tbody td:last-child{border-right:none;}
+    td.nom{font-size:18px;font-weight:900;}
+    td.owner{color:var(--text-dim);}
+    td.num{text-align:right;font-weight:900;font-size:18px;color:var(--gold-light);}
+    td.pct{text-align:right;color:var(--text-dim);}
+    .badge{display:inline-block;padding:5px 14px;border-radius:20px;font-size:13px;font-weight:900;letter-spacing:0.06em;text-transform:uppercase;}
+    .on{background:rgba(46,204,113,0.15);color:var(--green);border:1px solid rgba(46,204,113,0.4);}
+    .off{background:rgba(224,85,85,0.1);color:var(--red);border:1px solid rgba(224,85,85,0.3);}
+    .loading{padding:80px;text-align:center;color:var(--text-dim);font-size:22px;font-weight:700;}
+    .site-footer{margin-top:60px;text-align:center;font-family:var(--font-title);letter-spacing:0.15em;}
+    .site-footer .line1{font-size:0.72rem;color:var(--text-faint);}
+    .site-footer .version{font-size:1rem;color:var(--gold-dim);letter-spacing:0.25em;display:block;margin-top:0.3rem;}
+  </style>
+</head>
+<body>
+  <a class="back" href="/">← Accueil</a>
+  <div class="page-title">PROPRIÉTÉS</div>
+  <div class="page-sub">Appartements · Statuts · Détails de commission</div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-val" id="s-total">—</div><div class="stat-lbl">Total</div></div>
+    <div class="stat"><div class="stat-val" id="s-actives">—</div><div class="stat-lbl">Actives</div></div>
+    <div class="stat"><div class="stat-val" id="s-inact">—</div><div class="stat-lbl">Inactives</div></div>
+    <div class="stat"><div class="stat-val" id="s-sans">—</div><div class="stat-lbl">Sans propriétaire</div></div>
+  </div>
+
+  <div class="table-wrap">
+    <div class="loading" id="loading">Chargement…</div>
+    <table id="tbl" style="display:none">
+      <thead>
+        <tr>
+          <th onclick="sortBy('nom')" class="sorted" data-col="nom">NOM <span class="si" id="icon-nom">▲</span></th>
+          <th onclick="sortBy('owner_nom')" data-col="owner_nom">PROPRIÉTAIRE <span class="si" id="icon-owner_nom">↕</span></th>
+          <th onclick="sortBy('active')" data-col="active">STATUT <span class="si" id="icon-active">↕</span></th>
+          <th onclick="sortBy('comm')" data-col="comm">COMMISSION <span class="si" id="icon-comm">↕</span></th>
+          <th onclick="sortBy('menage')" data-col="menage">MÉNAGE (€) <span class="si" id="icon-menage">↕</span></th>
+          <th onclick="sortBy('nb_res')" data-col="nb_res">RÉSERVATIONS <span class="si" id="icon-nb_res">↕</span></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <footer class="site-footer">
+    <span class="line1">SUIVI RÉSERVATIONS · PORT 3010</span>
+    <span class="version">v0.1.4</span>
+  </footer>
+
+  <script>
+    let data=[], sortCol='nom', sortAsc=true;
+    async function load(){
+      try{
+        const r=await fetch('/api/listings'); data=await r.json();
+        document.getElementById('s-total').textContent=data.length;
+        document.getElementById('s-actives').textContent=data.filter(l=>l.active).length;
+        document.getElementById('s-inact').textContent=data.filter(l=>!l.active).length;
+        document.getElementById('s-sans').textContent=data.filter(l=>!l.owner_nom).length;
+        render();
+        document.getElementById('loading').style.display='none';
+        document.getElementById('tbl').style.display='table';
+      }catch(e){document.getElementById('loading').textContent='Erreur : '+e.message;}
+    }
+    function sortBy(col){
+      if(sortCol===col)sortAsc=!sortAsc; else{sortCol=col;sortAsc=true;}
+      document.querySelectorAll('thead th').forEach(t=>t.classList.remove('sorted'));
+      document.querySelector('[data-col="'+col+'"]').classList.add('sorted');
+      document.querySelectorAll('.si').forEach(i=>i.textContent='↕');
+      document.getElementById('icon-'+col).textContent=sortAsc?'▲':'▼';
+      render();
+    }
+    function fmt(v,s=''){return v==null?'—':Number(v).toLocaleString('fr-FR')+s;}
+    function render(){
+      const s=[...data].sort((a,b)=>{
+        let va=a[sortCol]??'', vb=b[sortCol]??'';
+        if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}
+        return va<vb?(sortAsc?-1:1):va>vb?(sortAsc?1:-1):0;
+      });
+      document.getElementById('tbody').innerHTML=s.map(l=>`
+        <tr>
+          <td class="nom">${l.nom}</td>
+          <td class="owner">${l.owner_nom||'<span style="opacity:0.3">—</span>'}</td>
+          <td><span class="badge ${l.active?'on':'off'}">${l.active?'Actif':'Inactif'}</span></td>
+          <td class="pct">${l.comm!=null?Math.round(l.comm*100)+'%':'—'}</td>
+          <td class="num">${l.menage!=null?fmt(l.menage)+' €':'—'}</td>
+          <td class="num">${l.nb_res}</td>
+        </tr>`).join('');
+    }
+    load();
+  </script>
+</body>
+</html>

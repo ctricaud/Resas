@@ -1,0 +1,13 @@
+{
+  "name": "suivi-reservations",
+  "version": "0.1.1",
+  "description": "Suivi des réservations — Black6",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.3",
+    "sql.js": "^1.12.0"
+  }
+}
