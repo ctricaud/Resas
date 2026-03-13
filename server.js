@@ -790,8 +790,7 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
         throw new Error('Aucun listing en base — faire d\'abord MAJ Propriétés.');
       }
 
-      // ── Chargement des réservations Guesty (max 500) ──────────────────────────
-      const MAX_RESERVATIONS = 500;
+      // ── Chargement de TOUTES les réservations Guesty (pagination complète) ──────
       const filterEncoded = encodeURIComponent('[{"operator":"$in","field":"status","value":["confirmed"]}]');
       const fields = 'status%20checkIn%20nightsCount%20listingId%20integration.platform';
       const PAGE   = 100;
@@ -799,22 +798,21 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
       let total    = Infinity;
       const guestyList = [];
 
-      log.push({ type: 'info', msg: `Chargement des réservations confirmées (max ${MAX_RESERVATIONS})…` });
+      log.push({ type: 'info', msg: 'Chargement de toutes les réservations confirmées (pagination complète)…' });
 
-      while (guestyList.length < Math.min(total, MAX_RESERVATIONS)) {
+      while (guestyList.length < total) {
         const url  = `https://open-api.guesty.com/v1/reservations?fields=${fields}&sort=-checkIn&limit=${PAGE}&skip=${skip}&filters=${filterEncoded}`;
         const resp = await guestyGet(token, url);
         const results = resp.results || [];
         if (skip === 0) {
           total = resp.count || resp.total || results.length;
-          log.push({ type: 'info', msg: `Total Guesty : ${total} — chargement limité à ${MAX_RESERVATIONS}.` });
+          log.push({ type: 'info', msg: `Total Guesty : ${total} réservation(s) à charger.` });
         }
         guestyList.push(...results);
-        if (results.length < PAGE || guestyList.length >= MAX_RESERVATIONS) break;
+        if (results.length < PAGE) break;
         skip += PAGE;
-        log.push({ type: 'info', msg: `  … ${guestyList.length} / ${Math.min(total, MAX_RESERVATIONS)} chargée(s)` });
+        log.push({ type: 'info', msg: `  … ${guestyList.length} / ${total} chargée(s)` });
       }
-      if (guestyList.length > MAX_RESERVATIONS) guestyList.length = MAX_RESERVATIONS;
 
       log.push({ type: 'ok', msg: `${guestyList.length} réservation(s) chargée(s).` });
 
