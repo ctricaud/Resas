@@ -128,6 +128,7 @@ p{line-height:1.6;color:#bbb;margin-bottom:.8rem}
   app.get('/reservations',(req,res) => res.sendFile(path.join(__dirname,'public','reservations.html')));
   app.get('/listings',   (req,res) => res.sendFile(path.join(__dirname,'public','listings.html')));
   app.get('/suivi-prises',(req,res) => res.sendFile(path.join(__dirname,'public','suivi-prises.html')));
+  app.get('/analyse-revenus',(req,res) => res.sendFile(path.join(__dirname,'public','analyse-revenus.html')));
   app.get('/owners',     (req,res) => res.sendFile(path.join(__dirname,'public','owners.html')));
 
   // ═══════════════════════════════════════════════════════════════════════════

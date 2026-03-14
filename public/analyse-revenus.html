@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Analyse des revenus — Suivi Réservations</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    :root{
+      --bg:#0a0a0a; --surface:#111; --border:#2a2a2a; --border-hi:#3a3a3a;
+      --gold:#f0b429; --gold-dim:#a07010; --gold-light:#ffd166;
+      --blue:#3b9eff; --blue-dim:#1a5fa0;
+      --green:#2ecc71; --green-dim:#1a7a43;
+      --text:#f0f0f0; --text-dim:#888; --text-faint:#444;
+      --row-alt:#0d0d0d; --row-hover:#1a1a1a; --row-total:#161616;
+      --font-title:'Bebas Neue',sans-serif; --font-ui:'Nunito',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{background:var(--bg);color:var(--text);font-family:var(--font-ui);min-height:100vh;padding:40px 48px 80px;}
+
+    .back{display:inline-flex;align-items:center;gap:8px;color:var(--gold);text-decoration:none;font-size:16px;font-weight:800;letter-spacing:0.05em;margin-bottom:40px;opacity:0.8;transition:opacity 0.2s;}
+    .back:hover{opacity:1;}
+
+    .page-title{font-family:var(--font-title);font-size:90px;color:var(--gold);letter-spacing:0.06em;line-height:1;margin-bottom:8px;text-shadow:0 0 40px rgba(240,180,41,0.3);}
+    .page-sub{font-size:20px;color:var(--text-dim);font-weight:700;margin-bottom:44px;letter-spacing:0.04em;}
+
+    /* ── Légende ── */
+    .legend{
+      display:flex;gap:28px;align-items:center;flex-wrap:wrap;
+      margin-bottom:24px;
+      background:var(--surface);border:1px solid var(--border);border-radius:10px;
+      padding:14px 24px;
+    }
+    .legend-item{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text-dim);}
+    .legend-item .swatch{display:inline-block;padding:2px 10px;border-radius:4px;font-size:13px;background:rgba(255,255,255,0.04);}
+    .swatch.bold{font-weight:900;color:var(--gold-light);}
+    .swatch.italic{font-style:italic;color:var(--text);}
+    .swatch.normal{font-weight:400;color:var(--text-dim);}
+
+    /* ── Filtres ── */
+    .filters{
+      background:var(--surface);border:1px solid var(--border);border-radius:14px;
+      padding:28px 32px;margin-bottom:36px;
+      display:flex;flex-wrap:wrap;gap:24px;align-items:flex-end;
+    }
+    .fg{display:flex;flex-direction:column;gap:8px;}
+    .fg label{font-family:var(--font-title);font-size:22px;color:var(--gold-light);letter-spacing:0.1em;}
+    .fg select{
+      background:var(--bg);border:1px solid var(--border);border-radius:8px;
+      color:var(--text);font-family:var(--font-ui);font-size:17px;font-weight:700;
+      padding:12px 18px;min-width:280px;outline:none;transition:border-color 0.2s;
+      cursor:pointer;
+    }
+    .fg select:focus{border-color:var(--gold);}
+    .fg select option{background:#1a1a1a;}
+
+    /* ── Indicateur de contexte ── */
+    .context-bar{
+      display:flex;align-items:center;gap:16px;
+      margin-bottom:28px;
+      font-family:var(--font-title);font-size:28px;
+      color:var(--text-dim);letter-spacing:0.06em;
+    }
+    .context-bar .ctx-val{color:var(--gold-light);}
+    .context-bar .ctx-nb{
+      font-size:16px;font-family:var(--font-ui);font-weight:700;
+      color:var(--text-faint);margin-left:8px;
+    }
+
+    /* ── Tableau croisé ── */
+    .table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);}
+    table{width:100%;border-collapse:collapse;}
+
+    /* En-tête années */
+    thead tr{background:#161616;border-bottom:2px solid var(--gold);}
+    thead th{
+      font-family:var(--font-title);font-size:28px;color:var(--gold-light);
+      letter-spacing:0.1em;padding:18px 28px;text-align:right;white-space:nowrap;
+      border-right:1px solid var(--border);
+    }
+    thead th:first-child{text-align:left;font-size:22px;color:var(--text-faint);}
+    thead th:last-child{border-right:none;}
+
+    /* Lignes mois */
+    tbody tr{border-bottom:1px solid var(--border);transition:background 0.15s;}
+    tbody tr:nth-child(even){background:var(--row-alt);}
+    tbody tr:hover{background:var(--row-hover);}
+    tbody td{
+      padding:14px 28px;
+      border-right:1px solid var(--border);
+      vertical-align:top;
+    }
+    tbody td:last-child{border-right:none;}
+    tbody td:first-child{
+      text-align:left;font-family:var(--font-title);font-size:24px;
+      color:var(--gold-light);letter-spacing:0.08em;
+      vertical-align:middle;white-space:nowrap;
+    }
+
+    /* Cellule de données — trois lignes */
+    .cell{display:flex;flex-direction:column;gap:3px;text-align:right;}
+    .cell-empty{color:var(--text-faint);font-size:16px;font-weight:600;text-align:right;padding:6px 0;}
+
+    /* Ligne 1 : montant versement */
+    .c-rev{
+      font-size:17px;font-weight:900;color:var(--gold-light);
+      white-space:nowrap;letter-spacing:0.01em;
+    }
+    .c-rev.highlight{color:var(--gold);}
+
+    /* Ligne 2 : taux de remplissage */
+    .c-occ{
+      font-size:14px;font-style:italic;font-weight:600;color:var(--text-dim);
+      white-space:nowrap;
+    }
+    .c-occ.highlight{color:var(--text);}
+
+    /* Ligne 3 : prix moyen / nuit */
+    .c-avg{
+      font-size:13px;font-weight:400;color:var(--text-faint);
+      white-space:nowrap;
+    }
+    .c-avg.highlight{color:var(--text-dim);}
+
+    /* Mois courant */
+    tbody tr.current-row td:first-child{color:var(--gold);}
+    .cell.current .c-rev{color:var(--gold);}
+    .cell.current .c-occ{color:var(--text);}
+    .cell.current .c-avg{color:var(--text-dim);}
+
+    /* Ligne total annuel */
+    tfoot tr{background:var(--row-total);border-top:2px solid var(--gold);}
+    tfoot td{
+      padding:16px 28px;
+      border-right:1px solid var(--border);
+      vertical-align:top;
+    }
+    tfoot td:last-child{border-right:none;}
+    tfoot td:first-child{
+      text-align:left;
+      font-family:var(--font-title);font-size:24px;
+      color:var(--gold);letter-spacing:0.12em;
+      vertical-align:middle;
+    }
+    tfoot .cell .c-rev{font-size:20px;color:var(--gold);}
+    tfoot .cell .c-occ{font-size:15px;color:var(--text);}
+    tfoot .cell .c-avg{font-size:14px;color:var(--text-dim);}
+
+    /* ── États de chargement ── */
+    .loading{padding:80px;text-align:center;color:var(--text-dim);font-size:22px;font-weight:700;}
+
+    /* ── Footer ── */
+    .site-footer{margin-top:60px;text-align:center;font-family:var(--font-title);letter-spacing:0.15em;}
+    .site-footer .line1{font-size:0.72rem;color:var(--text-faint);}
+    .site-footer .version{font-size:1rem;color:var(--gold-dim);letter-spacing:0.25em;display:block;margin-top:0.3rem;}
+  </style>
+</head>
+<body>
+
+  <a class="back" href="/">← Accueil</a>
+  <div class="page-title">ANALYSE DES REVENUS</div>
+  <div class="page-sub">Revenus, taux de remplissage et prix moyen par nuit — répartis par mois de séjour</div>
+
+  <!-- Légende -->
+  <div class="legend">
+    <div class="legend-item"><span class="swatch bold">1 234,56 €</span>Revenus de la période (versement proraté)</div>
+    <div class="legend-item"><span class="swatch italic">72,4 %</span>Taux de remplissage (nuits louées / nuits du mois)</div>
+    <div class="legend-item"><span class="swatch normal">87,30 €</span>Prix moyen par nuit louée</div>
+  </div>
+
+  <!-- Filtres -->
+  <div class="filters">
+    <div class="fg">
+      <label>VOIR PAR</label>
+      <select id="f-type" onchange="onTypeChange()">
+        <option value="all">Tous — Vue globale</option>
+        <option value="owner">Par propriétaire</option>
+        <option value="listing">Par appartement</option>
+      </select>
+    </div>
+    <div class="fg" id="fg-owner" style="display:none">
+      <label>PROPRIÉTAIRE</label>
+      <select id="f-owner" onchange="onFilterChange()">
+        <option value="">— Choisir —</option>
+      </select>
+    </div>
+    <div class="fg" id="fg-listing" style="display:none">
+      <label>APPARTEMENT</label>
+      <select id="f-listing" onchange="onFilterChange()">
+        <option value="">— Choisir —</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Contexte actif -->
+  <div class="context-bar" id="context-bar" style="display:none">
+    <span>FILTRE ACTIF :</span>
+    <span class="ctx-val" id="ctx-val">—</span>
+    <span class="ctx-nb" id="ctx-nb"></span>
+  </div>
+
+  <!-- Tableau -->
+  <div class="table-wrap">
+    <div class="loading" id="loading">Chargement…</div>
+    <table id="tbl" style="display:none">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+      <tfoot id="tfoot"></tfoot>
+    </table>
+  </div>
+
+  <footer class="site-footer">
+    <span class="line1">SUIVI RÉSERVATIONS · PORT 3010</span>
+    <span class="version">v0.1.4</span>
+  </footer>
+
+  <script>
+    const MOIS = ['JANVIER','FÉVRIER','MARS','AVRIL','MAI','JUIN',
+                  'JUILLET','AOÛT','SEPTEMBRE','OCTOBRE','NOVEMBRE','DÉCEMBRE'];
+
+    let allData  = [];
+    let owners   = [];
+    let listings = [];
+
+    // ── Chargement initial ────────────────────────────────────────────────────
+    async function init() {
+      try {
+        const [rRes, rOwn, rLst] = await Promise.all([
+          fetch('/api/reservations'),
+          fetch('/api/owners'),
+          fetch('/api/listings')
+        ]);
+        allData  = await rRes.json();
+        owners   = await rOwn.json();
+        listings = await rLst.json();
+
+        const selOwn = document.getElementById('f-owner');
+        owners.filter(o => o.nb_res > 0).forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o.id; opt.textContent = o.nom;
+          selOwn.appendChild(opt);
+        });
+
+        const selLst = document.getElementById('f-listing');
+        listings.filter(l => l.nb_res > 0).forEach(l => {
+          const opt = document.createElement('option');
+          opt.value = l.id; opt.textContent = l.nom;
+          selLst.appendChild(opt);
+        });
+
+        document.getElementById('loading').style.display = 'none';
+        buildTable(allData);
+      } catch(e) {
+        document.getElementById('loading').textContent = 'Erreur : ' + e.message;
+      }
+    }
+
+    // ── Filtres ────────────────────────────────────────────────────────────────
+    function onTypeChange() {
+      const type = document.getElementById('f-type').value;
+      document.getElementById('fg-owner').style.display   = type === 'owner'   ? '' : 'none';
+      document.getElementById('fg-listing').style.display = type === 'listing' ? '' : 'none';
+      document.getElementById('f-owner').value   = '';
+      document.getElementById('f-listing').value = '';
+      if (type === 'all') {
+        document.getElementById('context-bar').style.display = 'none';
+        buildTable(allData);
+      }
+    }
+
+    function onFilterChange() {
+      const type    = document.getElementById('f-type').value;
+      const ownerId = document.getElementById('f-owner').value;
+      const lstId   = document.getElementById('f-listing').value;
+
+      if (type === 'owner' && ownerId) {
+        const owner    = owners.find(o => o.id === ownerId);
+        const filtered = allData.filter(r => {
+          const lst = listings.find(l => l.id === r.listing_id);
+          return lst && lst.owner_id === ownerId;
+        });
+        showContext(owner ? owner.nom : ownerId, filtered.length + ' réservations');
+        buildTable(filtered);
+
+      } else if (type === 'listing' && lstId) {
+        const lst      = listings.find(l => l.id === lstId);
+        const filtered = allData.filter(r => r.listing_id === lstId);
+        showContext(lst ? lst.nom : lstId, filtered.length + ' réservations');
+        buildTable(filtered);
+      }
+    }
+
+    function showContext(label, nb) {
+      document.getElementById('ctx-val').textContent = label;
+      document.getElementById('ctx-nb').textContent  = '(' + nb + ')';
+      document.getElementById('context-bar').style.display = '';
+    }
+
+    // ── Nombre de jours dans un mois ─────────────────────────────────────────
+    function daysInMonth(year, month0) {
+      // month0 : 0-based (0=Jan, 11=Dec)
+      return new Date(parseInt(year), month0 + 1, 0).getDate();
+    }
+
+    // ── Distribution d'une réservation par mois ───────────────────────────────
+    // Retourne un tableau {yearStr, month0, nights, revenue}
+    // en éclat proportionnel aux nuits séjournées dans chaque mois.
+    function distribute(r) {
+      if (!r.date_debut || r.duree <= 0 || r.versement == null) return [];
+      const debut    = new Date(r.date_debut + 'T00:00:00');
+      const duree    = r.duree;
+      const versement= Number(r.versement) || 0;
+      const byMonth  = {};   // "YYYY-M" -> nights
+
+      for (let i = 0; i < duree; i++) {
+        const d  = new Date(debut);
+        d.setDate(d.getDate() + i);
+        const yr = d.getFullYear();
+        const mo = d.getMonth();         // 0-based
+        const key = yr + '-' + mo;
+        byMonth[key] = (byMonth[key] || 0) + 1;
+      }
+
+      return Object.entries(byMonth).map(([key, nights]) => {
+        const [yr, mo] = key.split('-');
+        return {
+          yearStr : yr,
+          month0  : parseInt(mo),
+          nights,
+          revenue : versement * nights / duree
+        };
+      });
+    }
+
+    // ── Construction du tableau ───────────────────────────────────────────────
+    function buildTable(data) {
+      // Récupérer les années présentes dans date_debut (≥ 2024)
+      const yearsSet = new Set();
+      data.forEach(r => {
+        if (r.date_debut) {
+          const y = r.date_debut.substring(0, 4);
+          if (parseInt(y) >= 2024) yearsSet.add(y);
+        }
+      });
+      const years = [...yearsSet].sort();
+
+      if (years.length === 0) {
+        document.getElementById('tbl').style.display  = 'none';
+        document.getElementById('loading').style.display = '';
+        document.getElementById('loading').textContent  = 'Aucune donnée disponible pour cette sélection.';
+        return;
+      }
+
+      // ── Matrice [month0][yearStr] = {revenue, nights}
+      // + suivi pour chaque mois/an du nombre de nuits totales disponibles
+      const matrix = {};
+      for (let m = 0; m < 12; m++) {
+        matrix[m] = {};
+        years.forEach(y => { matrix[m][y] = null; }); // null = aucune réservation
+      }
+
+      data.forEach(r => {
+        distribute(r).forEach(({yearStr, month0, nights, revenue}) => {
+          if (!years.includes(yearStr) || month0 < 0 || month0 > 11) return;
+          if (parseInt(yearStr) < 2024) return;
+          if (matrix[month0][yearStr] === null) {
+            matrix[month0][yearStr] = {revenue: 0, nights: 0};
+          }
+          matrix[month0][yearStr].revenue += revenue;
+          matrix[month0][yearStr].nights  += nights;
+        });
+      });
+
+      // ── Totaux annuels
+      // Revenue = somme des revenus mensuels
+      // Nights rented = somme des nuits louées dans l'année
+      // Occupancy = nuits louées / jours dans l'année
+      // Avg price = revenue total / nuits louées total
+      const totals = {};
+      years.forEach(y => {
+        let totalRevenue = 0;
+        let totalNightsRented = 0;
+        const totalNightsAvail = isLeapYear(parseInt(y)) ? 366 : 365;
+
+        for (let m = 0; m < 12; m++) {
+          const cell = matrix[m][y];
+          if (cell !== null) {
+            totalRevenue      += cell.revenue;
+            totalNightsRented += cell.nights;
+          }
+        }
+
+        const occ = totalNightsAvail > 0 && totalNightsRented > 0
+          ? totalNightsRented / totalNightsAvail
+          : null;
+        const avg = totalNightsRented > 0
+          ? totalRevenue / totalNightsRented
+          : null;
+
+        totals[y] = {revenue: totalRevenue, nightsRented: totalNightsRented, occ, avg};
+      });
+
+      // ── Mois/année courants
+      const now  = new Date();
+      const curY = String(now.getFullYear());
+      const curM = now.getMonth(); // 0-based
+
+      // ── THEAD
+      let thead = '<tr><th>MOIS</th>';
+      years.forEach(y => { thead += `<th>${y}</th>`; });
+      thead += '</tr>';
+      document.getElementById('thead').innerHTML = thead;
+
+      // ── TBODY
+      let tbody = '';
+      for (let m = 0; m < 12; m++) {
+        const isCurRow = (curM === m);
+        tbody += `<tr${isCurRow ? ' class="current-row"' : ''}>`;
+        tbody += `<td>${MOIS[m]}</td>`;
+        years.forEach(y => {
+          const cell   = matrix[m][y];
+          const isCur  = (y === curY && m === curM);
+          const avail  = daysInMonth(parseInt(y), m);
+
+          if (cell === null) {
+            tbody += `<td><div class="cell-empty">—</div></td>`;
+          } else {
+            const occ = avail > 0 && cell.nights > 0
+              ? cell.nights / avail
+              : null;
+            const avg = cell.nights > 0
+              ? cell.revenue / cell.nights
+              : null;
+            const cls = 'cell' + (isCur ? ' current' : '');
+            tbody += `<td>
+              <div class="${cls}">
+                <div class="c-rev${isCur?' highlight':''}">${fmtEur(cell.revenue)}</div>
+                <div class="c-occ${isCur?' highlight':''}">${occ !== null ? fmtPct(occ) : '—'}</div>
+                <div class="c-avg${isCur?' highlight':''}">${avg !== null ? fmtEur(avg)+'/nuit' : '—'}</div>
+              </div></td>`;
+          }
+        });
+        tbody += '</tr>';
+      }
+      document.getElementById('tbody').innerHTML = tbody;
+
+      // ── TFOOT
+      let tfoot = '<tr><td>TOTAL</td>';
+      years.forEach(y => {
+        const t = totals[y];
+        if (t.nightsRented === 0) {
+          tfoot += `<td><div class="cell-empty">—</div></td>`;
+        } else {
+          tfoot += `<td>
+            <div class="cell">
+              <div class="c-rev">${fmtEur(t.revenue)}</div>
+              <div class="c-occ">${t.occ !== null ? fmtPct(t.occ) : '—'}</div>
+              <div class="c-avg">${t.avg !== null ? fmtEur(t.avg)+'/nuit' : '—'}</div>
+            </div></td>`;
+        }
+      });
+      tfoot += '</tr>';
+      document.getElementById('tfoot').innerHTML = tfoot;
+
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('tbl').style.display     = 'table';
+    }
+
+    // ── Utilitaires ──────────────────────────────────────────────────────────
+    function isLeapYear(y) {
+      return (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+    }
+
+    function fmtEur(v) {
+      if (v == null || isNaN(v)) return '—';
+      return v.toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
+    }
+
+    function fmtPct(v) {
+      if (v == null || isNaN(v)) return '—';
+      return (v * 100).toLocaleString('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:1}) + ' %';
+    }
+
+    init();
+  </script>
+</body>
+</html>
