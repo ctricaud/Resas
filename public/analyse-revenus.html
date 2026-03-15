@@ -249,7 +249,17 @@
         });
 
         document.getElementById('loading').style.display = 'none';
-        buildTable(allData);
+        const _sf = JSON.parse(localStorage.getItem('filters_revenus')||'{}');
+        if (_sf.type && _sf.type !== 'all') {
+          document.getElementById('f-type').value = _sf.type;
+          document.getElementById('fg-owner').style.display   = _sf.type === 'owner'   ? '' : 'none';
+          document.getElementById('fg-listing').style.display = _sf.type === 'listing' ? '' : 'none';
+          if (_sf.owner)   document.getElementById('f-owner').value   = _sf.owner;
+          if (_sf.listing) document.getElementById('f-listing').value = _sf.listing;
+          onFilterChange();
+        } else {
+          buildTable(allData);
+        }
       } catch(e) {
         document.getElementById('loading').textContent = 'Erreur : ' + e.message;
       }
@@ -262,6 +272,7 @@
       document.getElementById('fg-listing').style.display = type === 'listing' ? '' : 'none';
       document.getElementById('f-owner').value   = '';
       document.getElementById('f-listing').value = '';
+      localStorage.setItem('filters_revenus', JSON.stringify({type, owner:'', listing:''}));
       if (type === 'all') {
         document.getElementById('context-bar').style.display = 'none';
         buildTable(allData);
@@ -272,6 +283,7 @@
       const type    = document.getElementById('f-type').value;
       const ownerId = document.getElementById('f-owner').value;
       const lstId   = document.getElementById('f-listing').value;
+      localStorage.setItem('filters_revenus', JSON.stringify({type, owner:ownerId, listing:lstId}));
 
       if (type === 'owner' && ownerId) {
         const owner    = owners.find(o => o.id === ownerId);

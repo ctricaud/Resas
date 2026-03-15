@@ -164,7 +164,12 @@
         const listings=[...new Set(all.map(r=>r.listing_nom))].sort();
         const sel=document.getElementById('f-lst');
         listings.forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;sel.appendChild(o);});
-        filtered=all; updateStats(); render();
+        const _sf=JSON.parse(localStorage.getItem('filters_reservations')||'{}');
+        if(_sf.plt) document.getElementById('f-plt').value=_sf.plt;
+        if(_sf.lst) document.getElementById('f-lst').value=_sf.lst;
+        if(_sf.df)  document.getElementById('f-df').value=_sf.df;
+        if(_sf.dt)  document.getElementById('f-dt').value=_sf.dt;
+        applyFilters();
         document.getElementById('loading').style.display='none';
         document.getElementById('tbl').style.display='table';
       }catch(e){document.getElementById('loading').textContent='Erreur : '+e.message;}
@@ -175,6 +180,7 @@
       const lst=document.getElementById('f-lst').value;
       const df=document.getElementById('f-df').value;
       const dt=document.getElementById('f-dt').value;
+      localStorage.setItem('filters_reservations', JSON.stringify({plt,lst,df,dt}));
       filtered=all.filter(r=>{
         if(plt&&r.plateforme!==plt)return false;
         if(lst&&r.listing_nom!==lst)return false;
@@ -188,6 +194,7 @@
     function resetFilters(){
       ['f-plt','f-lst'].forEach(id=>document.getElementById(id).value='');
       ['f-df','f-dt'].forEach(id=>document.getElementById(id).value='');
+      localStorage.removeItem('filters_reservations');
       filtered=all; updateStats(); render();
     }
 
